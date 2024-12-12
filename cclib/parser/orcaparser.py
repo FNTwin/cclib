@@ -934,6 +934,8 @@ Dispersion correction           -0.016199959
             line = next(inputfile)
             while len(line) > 20:  # restricted calcs are terminated by ------
                 info = line.split()
+                if info[0] == "*Only":
+                    break
                 mooccno = int(float(info[1]))
                 moenergy = float(info[2])
                 mosym = "A"
@@ -2185,7 +2187,26 @@ Dispersion correction           -0.016199959
         # Magnitude (Debye)      :      0.00000
         #
         # TODO: add quadrupole moment parsing, which can be optionally calculated with ORCA
-
+        if line.startswith("QUADRUPOLE MOMENT"):
+            quadrupoles=[]
+            self.skip_lines(inputfile, ["d", "Method", "Type",
+                                        "Multiplicity", "Irrep", 
+                                        "Energy", "Relativity",
+                                        "Basis","b", "XX", "NUC", "EL", "TOT",
+                                        "b", "b", "b", "diagonalized"])
+            total = next(inputfile)
+            quadrupoles.append(numpy.array([float(d) for d in next(inputfile).split("(")[0].split()[-3:]]))
+            quadrupoles.append(numpy.array([float(d) for d in next(inputfile).split("(")[0].split()[-3:]]))
+            quadrupoles.append(numpy.array([float(d) for d in next(inputfile).split("(")[0].split()[-3:]]))
+            #self.skip_lines(inputfile, ["b"])
+            q_array=[]
+            q_array.append([float(d) for d in next(inputfile).split()[-3:]])
+            q_array.append([float(d) for d in next(inputfile).split()[-3:]])
+            q_array.append([float(d) for d in next(inputfile).split()[-3:]])
+            q_array=numpy.array(q_array)
+            self.skip_lines(inputfile, ["b"])
+            isotropic = float(next(inputfile).split(":")[-1].strip())
+            print(quadrupoles, isotropic, q_array)
         # the origin/reference might be printed in multiple places in the output file
         # depending on the calculation type
         if line.startswith("The origin for moment calculation is"):
@@ -2196,8 +2217,18 @@ Dispersion correction           -0.016199959
             self.reference = numpy.array([reference_x, reference_y, reference_z])
 
         if line.startswith("DIPOLE MOMENT"):
-            self.skip_lines(inputfile, ["d", "XYZ", "electronic", "nuclear", "d"])
+            #self.skip_lines(inputfile, ["d", "XYZ", "electronic", "nuclear", "d"])
+            #self.skip_lines(inputfile, ["Method", "Type", "Multiplicity", "Irrep", "Energy", "Relativity", "Basis"])
+            #self.skip_lines(inputfile, ["d", "Method", "Type", "Multiplicity", "Irrep", "Energy", "Relativity",
+            #                            "Basis", "X", "electronic", "nuclear", "d"])
+            #print(next(inputfile))
+            self.skip_lines(inputfile, ["d", "Method", "Type",
+                                        "Multiplicity", "Irrep", 
+                                        "Energy", "Relativity",
+                                        "Basis", "XYZ", "Electronic", "Nuclear", "d", "d"])
             total = next(inputfile)
+            print("HERE")
+            print(total)
             assert "Total Dipole Moment" in total
 
             dipole = numpy.array([float(d) for d in total.split()[-3:]])
@@ -2814,8 +2845,8 @@ Dispersion correction           -0.016199959
             else:
                 rmsDP_value = None
                 rmsDP_target = None
-
-        self.scfvalues[-1].append([deltaE_value, maxDP_value, rmsDP_value])
+        print(self.scfvalues)
+        self.scfvalues.append([deltaE_value, maxDP_value, rmsDP_value])
         self.scftargets.append([deltaE_target, maxDP_target, rmsDP_target])
 
 
