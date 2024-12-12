@@ -213,9 +213,9 @@ class DALTON(logfileparser.Logfile):
                 line = next(inputfile)
 
             # Split lines into columsn and dd any missing symmetry labels, if needed.
-            lines = [l.split() for l in lines]
-            if any([len(l) == 3 for l in lines]):
-                for il, l in enumerate(lines):
+            lines = [l.split() for l in lines]  # noqa: E741
+            if any([len(l) == 3 for l in lines]):  # noqa: E741
+                for il, l in enumerate(lines):  # noqa: E741
                     if len(l) == 2:
                         lines[il] = [l[0], "_1", l[1]]
 
@@ -495,7 +495,7 @@ class DALTON(logfileparser.Logfile):
                     orbital = cols[2]
                     prims = [int(i) - 1 for i in cols[3:]]
 
-                shell = orbital[0]
+                shell = orbital[0]  # noqa: F841
                 subshell = orbital[1].upper()
 
                 iatom = basisatoms[ibasis]
@@ -649,8 +649,7 @@ class DALTON(logfileparser.Logfile):
         if "Dispersion Energy Correction" in line:
             self.skip_lines(inputfile, ["pluses_and_dashes", "b"])
             line = next(inputfile)
-            dispersion = utils.convertor(float(line.split()[-1]), "hartree", "eV")
-            self.append_attribute("dispersionenergies", dispersion)
+            self.append_attribute("dispersionenergies", float(line.split()[-1]))
 
         #  *********************************************
         #  ***** DIIS optimization of Hartree-Fock *****
@@ -761,7 +760,7 @@ class DALTON(logfileparser.Logfile):
             # the number of electrons for open-shell calculations.
             while "Number of electrons" not in line:
                 line = next(inputfile)
-            nelectrons = int(line.split()[-1])
+            nelectrons = int(line.split()[-1])  # noqa: F841
 
             line = next(inputfile)
             occupations = [int(o) for o in line.split()[3:]]
@@ -811,9 +810,7 @@ class DALTON(logfileparser.Logfile):
             moenergies, mosyms = zip(*sdata)
 
             self.moenergies = [[]]
-            self.moenergies[0] = [
-                utils.convertor(moenergy, "hartree", "eV") for moenergy in moenergies
-            ]
+            self.moenergies[0] = [moenergy for moenergy in moenergies]
             self.mosyms = [[]]
             self.mosyms[0] = mosyms
 
@@ -848,18 +845,14 @@ class DALTON(logfileparser.Logfile):
             self.metadata["functional"] = line.split()[-1]
 
         if "Final DFT energy" in line or "Final HF energy" in line:
-            if not hasattr(self, "scfenergies"):
-                self.scfenergies = []
             temp = line.split()
-            self.scfenergies.append(utils.convertor(float(temp[-1]), "hartree", "eV"))
+            self.append_attribute("scfenergies", float(temp[-1]))
 
         if "@   = MP2 second order energy" in line:
             self.metadata["methods"].append("MP2")
-            energ = utils.convertor(float(line.split()[-1]), "hartree", "eV")
             if not hasattr(self, "mpenergies"):
                 self.mpenergies = []
-            self.mpenergies.append([])
-            self.mpenergies[-1].append(energ)
+            self.mpenergies.append([float(line.split()[-1])])
 
         if "Starting in Coupled Cluster Section (CC)" in line:
             self.section = "CC"
@@ -872,10 +865,7 @@ class DALTON(logfileparser.Logfile):
                     if not hasattr(self, "mpenergies") or not len(self.mpenergies) == len(
                         self.scfenergies
                     ):
-                        self.append_attribute(
-                            "mpenergies",
-                            [utils.convertor(float(line.split()[-1]), "hartree", "eV")],
-                        )
+                        self.append_attribute("mpenergies", [float(line.split()[-1])])
                 if "Total CCSD  energy:" in line:
                     self.metadata["methods"].append("CCSD")
                     ccenergies.append(float(line.split()[-1]))
@@ -884,9 +874,7 @@ class DALTON(logfileparser.Logfile):
                     ccenergies.append(float(line.split()[-1]))
                 line = next(inputfile)
             if ccenergies:
-                self.append_attribute(
-                    "ccenergies", utils.convertor(ccenergies[-1], "hartree", "eV")
-                )
+                self.append_attribute("ccenergies", ccenergies[-1])
 
         if "Tau1 diagnostic" in line:
             self.metadata["t1_diagnostic"] = float(line.split()[-1])
@@ -964,9 +952,8 @@ class DALTON(logfileparser.Logfile):
             iteration = int(line.split()[-1])
             line = next(inputfile)
             assert "End of optimization" in line
-            if not hasattr(self, "optdone"):
-                self.optdone = []
-            self.optdone.append(line.split()[-1] == "T")
+            if line.split()[-1] == "T":
+                self.append_attribute("optdone", iteration - 1)
 
             # We need a way to map between lines here and the targets stated at the
             # beginning of the file in 'Chosen parameters for *OPTIMI (see above),
@@ -994,7 +981,7 @@ class DALTON(logfileparser.Logfile):
             # If we're missing something above, throw away the partial geovalues since
             # we don't want artificial NaNs getting into cclib. Instead, fix the dictionary
             # to make things work.
-            if not numpy.nan in values:
+            if numpy.nan not in values:
                 if not hasattr(self, "geovalues"):
                     self.geovalues = []
                 self.geovalues.append(values)
@@ -1014,7 +1001,7 @@ class DALTON(logfileparser.Logfile):
             line = next(inputfile)
             line = next(inputfile)
             line = next(inputfile)
-            if not "zero by symmetry" in line:
+            if "zero by symmetry" not in line:
                 line = next(inputfile)
 
                 line = next(inputfile)
@@ -1276,10 +1263,12 @@ class DALTON(logfileparser.Logfile):
                     etoscs_keys.add(etosc_key)
                     etsym = tokens[9]
                     etsyms.append(f"{symmap[do_triplet]}-{etsym}")
-                    self.skip_lines(inputfile, ["d", "b", "Excitation energy in a.u."])
+                    self.skip_lines(inputfile, ["d", "b"])
                     line = next(inputfile)
-                    etenergies.append(utils.float(line.split()[3]))
-                    self.skip_lines(inputfile, ["b", "@ Total energy", "b"])
+                    etenergies.append(utils.float(line.split()[4]))
+                    self.skip_lines(
+                        inputfile, ["energy in other units", "b", "@ Total energy", "b"]
+                    )
 
                 if line.startswith("@ Operator type:"):
                     line = next(inputfile)
@@ -1347,10 +1336,7 @@ class DALTON(logfileparser.Logfile):
         # atomcharges
         # atomspins
         # coreelectrons
-        # enthalpy
-        # entropy
         # etrotats
-        # freeenergy
         # grads
         # hessian
         # mocoeffs
@@ -1360,11 +1346,4 @@ class DALTON(logfileparser.Logfile):
         # scanenergies
         # scannames
         # scanparm
-        # temperature
         # vibanharms
-
-        # N/A:
-        # fonames
-        # fooverlaps
-        # fragnames
-        # frags

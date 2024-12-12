@@ -28,13 +28,13 @@ class ccData:
         atommasses -- atom masses (array[1], daltons)
         atomnos -- atomic numbers (array[1])
         atomspins -- atomic spin densities (dict of arrays[1])
-        ccenergies -- molecular energies with Coupled-Cluster corrections (array[2], eV)
+        ccenergies -- molecular energies with Coupled-Cluster corrections (array[2], hartree)
         charge -- net charge of the system (integer)
         coreelectrons -- number of core electrons in atom pseudopotentials (array[1])
-        dispersionenergies -- dispersion energy corrections (array[1], eV)
+        dispersionenergies -- dispersion energy corrections (array[1], hartree)
         enthalpy -- sum of electronic and thermal enthalpies (float, hartree/particle)
         entropy -- entropy (float, hartree/(particle*kelvin))
-        etenergies -- energies of electronic transitions (array[1], 1/cm)
+        etenergies -- energies of electronic transitions (array[1], hartree)
         etoscs -- oscillator strengths of electronic transitions (array[1])
         etdips -- electric transition dipoles of electronic transitions (array[2], ebohr)
         etveldips -- velocity-gauge electric transition dipoles of electronic transitions (array[2], ebohr)
@@ -55,10 +55,10 @@ class ccData:
         homos -- molecular orbital indices of HOMO(s) (array[1])
         metadata -- various metadata about the package and computation (dict)
         mocoeffs -- molecular orbital coefficients (list of arrays[2])
-        moenergies -- molecular orbital energies (list of arrays[1], eV)
+        moenergies -- molecular orbital energies (list of arrays[1], hartree)
         moments -- molecular multipole moments (list of arrays[], a.u.)
         mosyms -- orbital symmetries (list of lists)
-        mpenergies -- molecular electronic energies with Møller-Plesset corrections (array[2], eV)
+        mpenergies -- molecular electronic energies with Møller-Plesset corrections (array[2], hartree)
         mult -- multiplicity of the system (integer)
         natom -- number of atoms (integer)
         nbasis -- number of basis functions (integer)
@@ -69,7 +69,7 @@ class ccData:
         nooccnos -- natural orbital occupation numbers (array[1])
         nsocoeffs -- natural spin orbital coefficients (list of array[2])
         nsooccnos -- natural spin orbital occupation numbers (list of array[1])
-        optdone -- flags whether an optimization has converged (List)
+        optdone -- flags whether an optimization has converged (list of int)
         optstatus -- optimization status for each set of atomic coordinates (array[1])
         polarizabilities -- (dipole) polarizabilities, static or dynamic (list of arrays[2])
         pressure -- pressure used for Thermochemistry (float, atm)
@@ -78,7 +78,7 @@ class ccData:
         scanenergies -- energies of potential energy surface (list)
         scannames -- names of variables scanned (list of strings)
         scanparm -- values of parameters in potential energy surface (list of tuples)
-        scfenergies -- molecular electronic energies after SCF (Hartree-Fock, DFT) (array[1], eV)
+        scfenergies -- molecular electronic energies after SCF (Hartree-Fock, DFT) (array[1], hartree)
         scftargets -- targets for convergence of the SCF (array[2])
         scfvalues -- current values for convergence of the SCF (list of arrays[2])
         temperature -- temperature used for Thermochemistry (float, kelvin)
@@ -227,15 +227,15 @@ class ccData:
         attrlist = [k for k in self._attrlist if hasattr(self, k)]
         for k in attrlist:
             v = self._attributes[k].type
-            if v == numpy.ndarray:
+            if v is numpy.ndarray:
                 setattr(self, k, getattr(self, k).tolist())
-            elif v == list and k in self._listsofarrays:
+            elif v is list and k in self._listsofarrays:
                 setattr(self, k, [x.tolist() for x in getattr(self, k)])
-            elif v == dict and k in self._dictsofarrays:
+            elif v is dict and k in self._dictsofarrays:
                 items = getattr(self, k).items()
                 pairs = [(key, val.tolist()) for key, val in items]
                 setattr(self, k, dict(pairs))
-            elif v == dict and k in self._dictsofdicts:
+            elif v is dict and k in self._dictsofdicts:
                 items = getattr(self, k).items()
                 pairs = [
                     (key, {subkey: subval.tolist()})
@@ -253,15 +253,15 @@ class ccData:
             precision = "d"
             if k in self._intarrays:
                 precision = "i"
-            if v == numpy.ndarray:
+            if v is numpy.ndarray:
                 setattr(self, k, numpy.array(getattr(self, k), precision))
-            elif v == list and k in self._listsofarrays:
+            elif v is list and k in self._listsofarrays:
                 setattr(self, k, [numpy.array(x, precision) for x in getattr(self, k)])
-            elif v == dict and k in self._dictsofarrays:
+            elif v is dict and k in self._dictsofarrays:
                 items = getattr(self, k).items()
                 pairs = [(key, numpy.array(val, precision)) for key, val in items]
                 setattr(self, k, dict(pairs))
-            elif v == dict and k in self._dictsofdicts:
+            elif v is dict and k in self._dictsofdicts:
                 items = getattr(self, k).items()
                 pairs = [
                     (
@@ -304,7 +304,7 @@ class ccData:
                       means they are not specified in self._attrlist
         """
 
-        if type(attributes) is not dict:
+        if not isinstance(attributes, dict):
             raise TypeError("attributes must be in a dictionary")
 
         valid = [a for a in attributes if a in self._attrlist]
@@ -328,7 +328,7 @@ class ccData:
         self.arrayify()
         for attr in [a for a in self._attrlist if hasattr(self, a)]:
             val = getattr(self, attr)
-            if type(val) == self._attributes[attr].type:
+            if type(val) is self._attributes[attr].type:
                 continue
 
             try:
@@ -444,19 +444,3 @@ class ccData:
     @property
     def closed_shell(self) -> bool:
         return orbitals.Orbitals(self).closed_shell()
-
-
-class ccData_optdone_bool(ccData):
-    """This is the version of ccData where optdone is a Boolean."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._attributes["optdone"] = Attribute(bool, "done", "optimization")
-
-    def setattributes(self, *args, **kwargs):
-        invalid = super().setattributes(*args, **kwargs)
-
-        # Reduce optdone to a Boolean, because it will be parsed as a list. If this list has any element,
-        # it means that there was an optimized structure and optdone should be True.
-        if hasattr(self, "optdone"):
-            self.optdone = len(self.optdone) > 0

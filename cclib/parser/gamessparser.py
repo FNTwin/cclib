@@ -193,7 +193,7 @@ class GAMESS(logfileparser.Logfile):
         # Symmetry: ordering of irreducible representations
         if line.strip() == "DIMENSIONS OF THE SYMMETRY SUBSPACES ARE":
             line = next(inputfile)
-            symlabels = [self.normalisesym(label) for label in line.split()[::3]]
+            symlabels = [self.normalisesym(label) for label in line.split()[::3]]  # noqa: F841
 
         # We are looking for this line:
         #           PARAMETERS CONTROLLING GEOMETRY SEARCH ARE
@@ -209,12 +209,8 @@ class GAMESS(logfileparser.Logfile):
         #  FINAL ENERGY IS     -379.7594673378 AFTER   9 ITERATIONS
         # ...so take the number after the "IS"
         if line.find("FINAL") == 1:
-            if not hasattr(self, "scfenergies"):
-                self.scfenergies = []
             temp = line.split()
-            self.scfenergies.append(
-                utils.convertor(float(temp[temp.index("IS") + 1]), "hartree", "eV")
-            )
+            self.append_attribute("scfenergies", float(temp[temp.index("IS") + 1]))
         # Empirical dispersion: first is GAMESS-US, second is Firefly
         if any(
             line.find(dispersion_trigger) == 1
@@ -223,8 +219,7 @@ class GAMESS(logfileparser.Logfile):
                 "Dispersion correction to total energy",
             )
         ):
-            dispersion = utils.convertor(float(line.split()[-1]), "hartree", "eV")
-            self.append_attribute("dispersionenergies", dispersion)
+            self.append_attribute("dispersionenergies", float(line.split()[-1]))
 
         # For total energies after Moller-Plesset corrections, the output looks something like this:
         #
@@ -268,30 +263,23 @@ class GAMESS(logfileparser.Logfile):
                         # Only up to MP2 correction
                         if line.split()[0] == "E(MP2)=":
                             self.metadata["methods"].append("MP2")
-                            mp2energy = float(line.split()[1])
-                            self.mpenergies[-1].append(utils.convertor(mp2energy, "hartree", "eV"))
+                            self.mpenergies[-1].append(float(line.split()[1]))
                         # MP2 before higher order calculations
                         if line.split()[0] == "E(MP2)":
-                            mp2energy = float(line.split()[2])
-                            self.mpenergies[-1].append(utils.convertor(mp2energy, "hartree", "eV"))
+                            self.mpenergies[-1].append(float(line.split()[2]))
                         if line.split()[0] == "E(MP3)":
                             self.metadata["methods"].append("MP3")
-                            mp3energy = float(line.split()[2])
-                            self.mpenergies[-1].append(utils.convertor(mp3energy, "hartree", "eV"))
+                            self.mpenergies[-1].append(float(line.split()[2]))
                         if line.split()[0] in ["E(MP4-SDQ)", "E(MP4-SDTQ)"]:
                             self.metadata["methods"].append("MP4")
-                            mp4energy = float(line.split()[2])
-                            self.mpenergies[-1].append(utils.convertor(mp4energy, "hartree", "eV"))
+                            self.mpenergies[-1].append(float(line.split()[2]))
                     line = next(inputfile)
 
         # Total energies after Coupled Cluster calculations
         # Only the highest Coupled Cluster level result is gathered
         if line[12:23] == "CCD ENERGY:":
             self.metadata["methods"].append("CCD")
-            if not hasattr(self, "ccenergies"):
-                self.ccenergies = []
-            ccenergy = float(line.split()[2])
-            self.ccenergies.append(utils.convertor(ccenergy, "hartree", "eV"))
+            self.append_attribute("ccenergies", float(line.split()[2]))
         if line.find("CCSD") >= 0 and line.split()[0:2] == ["CCSD", "ENERGY:"]:
             self.metadata["methods"].append("CCSD")
             if not hasattr(self, "ccenergies"):
@@ -305,18 +293,14 @@ class GAMESS(logfileparser.Logfile):
                 if line[8:23] == "CCSD(T) ENERGY:":
                     self.metadata["methods"].append("CCSD(T)")
                     ccenergy = float(line.split()[2])
-            self.ccenergies.append(utils.convertor(ccenergy, "hartree", "eV"))
+            self.ccenergies.append(ccenergy)
 
         if "T1 DIAGNOSTIC" in line:
             self.metadata["t1_diagnostic"] = float(line.split()[3])
 
         # Also collect MP2 energies, which are always calculated before CC
         if line[8:23] == "MBPT(2) ENERGY:":
-            if not hasattr(self, "mpenergies"):
-                self.mpenergies = []
-            self.mpenergies.append([])
-            mp2energy = float(line.split()[2])
-            self.mpenergies[-1].append(utils.convertor(mp2energy, "hartree", "eV"))
+            self.append_attribute("mpenergies", [float(line.split()[2])])
 
         # Extract charge and multiplicity
         if line[1:19] == "CHARGE OF MOLECULE":
@@ -337,9 +321,6 @@ class GAMESS(logfileparser.Logfile):
         #   1A''   0.1677341781     4.5643    105.2548      36813.40     271.64
         #   ...
         if re.match("(CI-SINGLES|TDDFT) EXCITATION ENERGIES", line.strip()):
-            if not hasattr(self, "etenergies"):
-                self.etenergies = []
-
             get_etosc = False
             header = next(inputfile).rstrip()
             if header.endswith("OSC. STR."):
@@ -353,10 +334,9 @@ class GAMESS(logfileparser.Logfile):
             line = next(inputfile)
             broken = line.split()
             while len(broken) > 0:
-                # Take hartree value with more numbers, and convert.
+                # Take hartree value with more digits.
                 # Note that the values listed after this are also less exact!
-                etenergy = float(broken[1])
-                self.etenergies.append(utils.convertor(etenergy, "hartree", "wavenumber"))
+                self.append_attribute("etenergies", float(broken[1]))
                 if get_etosc:
                     etosc = float(broken[-1])
                     self.etoscs.append(etosc)
@@ -409,7 +389,7 @@ class GAMESS(logfileparser.Logfile):
             if "OPTICALLY" in line:
                 pass
             else:
-                statenumber = int(line.split()[-1])
+                statenumber = int(line.split()[-1])  # noqa: F841
                 self.skip_lines(
                     inputfile,
                     [
@@ -482,7 +462,7 @@ class GAMESS(logfileparser.Logfile):
             while line[1:6] == "STATE":
                 self.updateprogress(inputfile, "Excited States")
 
-                etenergy = utils.convertor(float(line.split()[-2]), "eV", "wavenumber")
+                etenergy = utils.convertor(float(line.split()[-2]), "eV", "hartree")
                 etoscs = float(next(inputfile).split()[-1])
                 self.etenergies.append(etenergy)
                 self.etoscs.append(etoscs)
@@ -514,7 +494,7 @@ class GAMESS(logfileparser.Logfile):
                     else:
                         i_occ_vir = [0, 1]
                         i_coeff = 2
-                    fromMO, toMO = [int(cols[i]) - 1 for i in i_occ_vir]
+                    fromMO, toMO = (int(cols[i]) - 1 for i in i_occ_vir)
                     coeff = float(cols[i_coeff])
                     CIScontribs.append([(fromMO, 0), (toMO, 0), coeff])
                     line = next(inputfile)
@@ -806,7 +786,7 @@ class GAMESS(logfileparser.Logfile):
             # Need to get to the modes line, which is often preceeded by
             # a list of atomic weights and some possible warnings.
             # Pass the warnings to the logger if they are there.
-            while not "MODES" in line:
+            while "MODES" not in line:
                 self.updateprogress(inputfile, "Frequency Information")
 
                 line = next(inputfile)
@@ -829,9 +809,10 @@ class GAMESS(logfileparser.Logfile):
                     self.set_attribute("atommasses", atommasses)
 
                 if "THIS IS NOT A STATIONARY POINT" in line:
-                    msg = "\n   This is not a stationary point on the molecular PES"
-                    msg += "\n   The vibrational analysis is not valid!!!"
-                    self.logger.warning(msg)
+                    self.logger.warning(
+                        "\n   This is not a stationary point on the molecular PES"
+                        "\n   The vibrational analysis is not valid!!!"
+                    )
                 if "* * * WARNING, MODE" in line:
                     line1 = line.strip()
                     line2 = next(inputfile).strip()
@@ -857,7 +838,7 @@ class GAMESS(logfileparser.Logfile):
             while not line.strip() or not re.search(" {26,}1", line) is not None:
                 line = next(inputfile)
 
-            while not "SAYVETZ" in line:
+            while "SAYVETZ" not in line:
                 self.updateprogress(inputfile, "Frequency Information")
 
                 # Note: there may be imaginary frequencies like this (which we make negative):
@@ -901,7 +882,7 @@ class GAMESS(logfileparser.Logfile):
                         self.vibramans = []
                     ramanIntensity = line.strip().split()
                     self.vibramans.extend(list(map(float, ramanIntensity[2:])))
-                    depolar = next(inputfile)
+                    depolar = next(inputfile)  # noqa: F841
                     line = next(inputfile)
 
                 # This line seems always to be blank.
@@ -1081,7 +1062,7 @@ class GAMESS(logfileparser.Logfile):
 
                 # This is for regression CdtetraM1B3LYP.
                 if "ALPHA SET" in numbers:
-                    blank = next(inputfile)
+                    self.skip_line(inputfile, "b")
                     numbers = next(inputfile)
 
                 # If not all coefficients are printed, the logfile will go right to
@@ -1101,10 +1082,8 @@ class GAMESS(logfileparser.Logfile):
 
                 # Eigenvalues for these orbitals (in hartrees).
                 try:
-                    self.moenergies[0].extend(
-                        [utils.convertor(float(x), "hartree", "eV") for x in line.split()]
-                    )
-                except:
+                    self.moenergies[0].extend([float(x) for x in line.split()])
+                except:  # noqa: E722
                     self.logger.warning("MO section found but could not be parsed!")
                     break
 
@@ -1128,7 +1107,6 @@ class GAMESS(logfileparser.Logfile):
 
                     # Fill atombasis and aonames only first time around
                     if readatombasis and base == 0:
-                        aonames = []
                         start = line[:17].strip()
                         m = p.search(start)
 
@@ -1196,10 +1174,10 @@ class GAMESS(logfileparser.Logfile):
 
             # Covers label with both dashes and stars (like regression CdtetraM1B3LYP).
             if "BETA SET" in line:
-                self.mocoeffs.append(numpy.zeros((self.nmo, self.nbasis), "d"))
-                self.moenergies.append([])
-                self.mosyms.append([])
-                blank = next(inputfile)
+                self.append_attribute("mocoeffs", numpy.zeros((self.nmo, self.nbasis), "d"))
+                self.append_attribute("moenergies", [])
+                self.append_attribute("mosyms", [])
+                self.skip_line(inputfile, "b")
                 line = next(inputfile)
 
                 # Sometimes EIGENVECTORS is missing, so rely on dashes to signal it.
@@ -1215,9 +1193,7 @@ class GAMESS(logfileparser.Logfile):
                     line = next(inputfile)
                     if "properties" in line.lower():
                         break
-                    self.moenergies[1].extend(
-                        [utils.convertor(float(x), "hartree", "eV") for x in line.split()]
-                    )
+                    self.moenergies[1].extend([float(x) for x in line.split()])
                     line = next(inputfile)
                     self.mosyms[1].extend(list(map(self.normalisesym, line.split())))
                     for i in range(self.nbasis):
@@ -1380,15 +1356,15 @@ class GAMESS(logfileparser.Logfile):
 
             header = next(inputfile)
             while header.split()[0] == "PARAMETERS":
-                name = header[17:25]
+                element_symbol_dash_ecp = header[17:25]  # noqa: F841
                 atomnum = int(header[34:40])
-                # The pseudopotnetial is given explicitely
+                # The pseudopotential is given explicitly
                 if header[40:50] == "WITH ZCORE":
                     zcore = int(header[50:55])
-                    lmax = int(header[63:67])
+                    lmax = int(header[63:67])  # noqa: F841
                     self.coreelectrons[atomnum - 1] = zcore
-                # The pseudopotnetial is copied from another atom
-                if header[40:55] == "ARE THE SAME AS":
+                # The pseudopotential is copied from another atom
+                elif header[40:55] == "ARE THE SAME AS":
                     atomcopy = int(header[60:])
                     self.coreelectrons[atomnum - 1] = self.coreelectrons[atomcopy - 1]
                 line = next(inputfile)
@@ -1419,7 +1395,7 @@ class GAMESS(logfileparser.Logfile):
             # so let's get a flag out of that circumstance.
             doubles_printed = line.strip() == ""
             if doubles_printed:
-                title = next(inputfile)
+                self.skip_line(inputfile, "TOTAL MULLIKEN AND LOWDIN ATOMIC POPULATIONS")
                 header = next(inputfile)
                 line = next(inputfile)
 
@@ -1453,7 +1429,7 @@ class GAMESS(logfileparser.Logfile):
 
             # The old PC-GAMESS prints memory assignment information here.
             if "MEMORY ASSIGNMENT" in line:
-                memory_assignment = next(inputfile)
+                self.skip_line(inputfile, "IELM IEMW IDENSA IDENSB LAST")
                 line = next(inputfile)
 
             # If something else ever comes up, we should get a signal from this assert.
@@ -1484,11 +1460,11 @@ class GAMESS(logfileparser.Logfile):
                 try:
                     assert self.moments[1] == dipole
                 except AssertionError:
-                    self.logger.warning("Overwriting previous multipole moments with new values")
                     self.logger.warning(
+                        "Overwriting previous multipole moments with new values; "
                         "This could be from post-HF properties or geometry optimization"
                     )
-                    self.moments = [reference, dipole]
+                    self.set_attribute("moments", [reference, dipole])
 
         # Static polarizability from a harmonic frequency calculation
         # with $CPHF/POLAR=.TRUE.
@@ -1636,17 +1612,14 @@ class GAMESS(logfileparser.Logfile):
             line = next(inputfile)  # TOTAL
             thermoValues = line.split()
 
-            if hasattr(self, "scfenergies"):
-                electronicEnergy = utils.convertor(self.scfenergies[-1], "eV", "hartree")
-            else:
-                electronicEnergy = 0  # GAMESS  prints thermochemistry at the end, so it should have a value for this already
+            electronic_energy = self.scfenergies[0]
             self.set_attribute(
                 "enthalpy",
-                electronicEnergy + utils.convertor(float(thermoValues[2]), "kcal/mol", "hartree"),
+                electronic_energy + utils.convertor(float(thermoValues[2]), "kcal/mol", "hartree"),
             )
             self.set_attribute(
                 "freeenergy",
-                electronicEnergy + utils.convertor(float(thermoValues[3]), "kcal/mol", "hartree"),
+                electronic_energy + utils.convertor(float(thermoValues[3]), "kcal/mol", "hartree"),
             )
             self.set_attribute(
                 "entropy", utils.convertor(float(thermoValues[6]) / 1000.0, "kcal/mol", "hartree")

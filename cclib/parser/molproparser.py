@@ -149,7 +149,7 @@ class Molpro(logfileparser.Logfile):
 
         # Besides a double blank line, stop when the next orbitals are encountered for unrestricted jobs
         # or if there are stars on the line which always signifies the end of the block.
-        while line.strip() and (not "ORBITALS" in line) and (not set(line.strip()) == {"*"}):
+        while line.strip() and ("ORBITALS" not in line) and (not set(line.strip()) == {"*"}):
             # The function names are normally printed just once, but if symmetry is used then each irrep
             # has its own mocoeff block with a preceding list of names.
             is_aonames = line[:25].strip() == ""
@@ -189,9 +189,7 @@ class Molpro(logfileparser.Logfile):
             while line.strip() != "":
                 if line[:31].rstrip():
                     tokens = line.split()
-                    moenergy = float(tokens[2])
-                    moenergy = utils.convertor(moenergy, "hartree", "eV")
-                    moenergies.append(moenergy)
+                    moenergies.append(float(tokens[2]))
                     if self.naturalorbitals:
                         occno = float(tokens[1])
                         occnos.append(occno)
@@ -206,7 +204,7 @@ class Molpro(logfileparser.Logfile):
                     try:
                         c = float(p)
                     except ValueError as detail:
-                        self.logger.warning(f"setting coeff element to zero: {detail}")
+                        self.logger.warning("setting coeff element to zero: %s", detail)
                         c = 0.0
                     coeff.append(c)
                 coeffs.extend(coeff)
@@ -345,7 +343,7 @@ class Molpro(logfileparser.Logfile):
                 # or indentation size. However, we will rely on explicit slices since not all components
                 # are always available. In fact, components not being there has some meaning (see below).
                 line_nr = line[1:6].strip()
-                line_sym = line[7:9].strip()
+                line_sym = line[7:9].strip()  # noqa: F841
                 line_nuc = line[11:15].strip()
                 line_type = line[16:22].strip()
                 line_exp = line[25:38].strip()
@@ -362,19 +360,19 @@ class Molpro(logfileparser.Logfile):
                     # update the dict if something unexpected comes up.
                     funcbasis = None
                     for fb, names in self.atomic_orbital_names.items():
-                        if functype in names:
+                        if functype in names:  # noqa: F821
                             funcbasis = fb
                     assert funcbasis
 
                     # There is a separate basis function for each column of contraction coefficients. Since all
                     # atomic orbitals for a subshell will have the same parameters, we can simply check if
                     # the function tuple is already in gbasis[i] before adding it.
-                    for i in range(len(coefficients[0])):
+                    for i in range(len(coefficients[0])):  # noqa: F821
                         func = (funcbasis, [])
-                        for j in range(len(exponents)):
-                            func[1].append((exponents[j], coefficients[j][i]))
-                        if func not in gbasis[funcatom - 1]:
-                            gbasis[funcatom - 1].append(func)
+                        for j in range(len(exponents)):  # noqa: F821
+                            func[1].append((exponents[j], coefficients[j][i]))  # noqa: F821
+                        if func not in gbasis[funcatom - 1]:  # noqa: F821
+                            gbasis[funcatom - 1].append(func)  # noqa: F821
 
                 # If it is a new type, set up the variables for the next shell(s). An exception is symmetry functions,
                 # which we want to copy from the previous function and don't have a new number on the line. For them,
@@ -485,21 +483,17 @@ class Molpro(logfileparser.Logfile):
                     line = next(inputfile)
                 except StopIteration:
                     self.logger.warning(
-                        f"File terminated before end of last SCF! Last gradient: {grad}"
+                        "File terminated before end of last SCF! Last gradient: %f", grad
                     )
                     break
             self.scfvalues.append(numpy.array(scfvalues))
 
         if "dispersion correction" in line and line.strip() != "dispersion correction activated":
-            dispersion = utils.convertor(float(line.split()[-1]), "hartree", "eV")
-            self.append_attribute("dispersionenergies", dispersion)
+            self.append_attribute("dispersionenergies", float(line.split()[-1]))
 
         # SCF result - RHF/UHF and DFT (RKS) energies.
         if line[1:5] in ["!RHF", "!UHF", "!RKS"] and line[16:22].lower() == "energy":
-            if not hasattr(self, "scfenergies"):
-                self.scfenergies = []
-            scfenergy = float(line.split()[4])
-            self.scfenergies.append(utils.convertor(scfenergy, "hartree", "eV"))
+            self.append_attribute("scfenergies", float(line.split()[4]))
 
             # We are now done with SCF cycle (after a few lines).
             self.insidescf = False
@@ -507,29 +501,19 @@ class Molpro(logfileparser.Logfile):
         # MP2 energies.
         if line[1:5] == "!MP2":
             self.metadata["methods"].append("MP2")
-
-            if not hasattr(self, "mpenergies"):
-                self.mpenergies = []
-            mp2energy = float(line.split()[-1])
-            mp2energy = utils.convertor(mp2energy, "hartree", "eV")
-            self.mpenergies.append([mp2energy])
+            self.append_attribute("mpenergies", [float(line.split()[-1])])
 
         # MP2 energies if MP3 or MP4 is also calculated.
         if line[1:5] == "MP2:":
             self.metadata["methods"].append("MP2")
-            if not hasattr(self, "mpenergies"):
-                self.mpenergies = []
-            mp2energy = float(line.split()[2])
-            mp2energy = utils.convertor(mp2energy, "hartree", "eV")
-            self.mpenergies.append([mp2energy])
+            self.append_attribute("mpenergies", [float(line.split()[2])])
 
         # MP3 (D) and MP4 (DQ or SDQ) energies.
         if line[1:8] == "MP3(D):":
             self.metadata["methods"].append("MP3")
             mp3energy = float(line.split()[2])
-            mp2energy = utils.convertor(mp3energy, "hartree", "eV")
             line = next(inputfile)
-            self.mpenergies[-1].append(mp2energy)
+            self.mpenergies[-1].append(mp3energy)
             if line[1:9] == "MP4(DQ):":
                 self.metadata["methods"].append("MP4")
                 mp4energy = float(line.split()[2])
@@ -537,23 +521,19 @@ class Molpro(logfileparser.Logfile):
                 if line[1:10] == "MP4(SDQ):":
                     self.metadata["methods"].append("MP4")
                     mp4energy = float(line.split()[2])
-                mp4energy = utils.convertor(mp4energy, "hartree", "eV")
                 self.mpenergies[-1].append(mp4energy)
 
         # The CCSD program operates all closed-shel coupled cluster runs.
         if line[1:15] == "PROGRAM * CCSD":
             self.metadata["methods"].append("CCSD")
-            if not hasattr(self, "ccenergies"):
-                self.ccenergies = []
             while line[1:20] != "Program statistics:":
                 if line[71:84] == "T1 diagnostic":
                     self.metadata["t1_diagnostic"] = float(line.split()[-1])
                 # The last energy (most exact) will be read last and thus saved.
                 if line[1:5] == "!CCD" or line[1:6] == "!CCSD" or line[1:9] == "!CCSD(T)":
                     ccenergy = float(line.split()[-1])
-                    ccenergy = utils.convertor(ccenergy, "hartree", "eV")
                 line = next(inputfile)
-            self.ccenergies.append(ccenergy)
+            self.append_attribute("ccenergies", ccenergy)
 
         # Read the occupancy (index of HOMO s).
         # For restricted calculations, there is one line here. For unrestricted, two:
@@ -680,7 +660,7 @@ class Molpro(logfileparser.Logfile):
             # Newer version of Molpro (at least for 2012) print and additional column
             # with the timing information for each step. Otherwise, the history looks the same.
             headers = next(inputfile).split()
-            if not len(headers) in (10, 11):
+            if len(headers) not in (10, 11):
                 return
 
             # Although criteria can be changed, the printed format should not change.
@@ -827,7 +807,7 @@ class Molpro(logfileparser.Logfile):
             while line.strip():
                 try:
                     list(map(float, line.strip().split()[2:]))
-                except:
+                except:  # noqa: E722
                     line = next(inputfile)
                 line.strip().split()[1:]
                 hess.extend([list(map(float, line.strip().split()[1:]))])
@@ -846,7 +826,7 @@ class Molpro(logfileparser.Logfile):
                     break
                 if k >= lig:
                     k = len(tmp[-1])
-            for l in tmp:
+            for l in tmp:  # noqa: E741
                 hessian += l
 
             self.set_attribute("hessian", hessian)

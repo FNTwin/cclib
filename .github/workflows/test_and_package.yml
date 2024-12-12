@@ -44,7 +44,7 @@ jobs:
           git config --global --add safe.directory /__w/cclib/cclib
       - name: Prepare conda environment
         run: |
-          echo "/opt/conda/envs/cclib/bin" >> $GITHUB_PATH
+          echo "/opt/conda/envs/cclib/bin" >> "${GITHUB_PATH}"
       - name: Install cclib
         run: |
           python -m pip install .
@@ -65,12 +65,14 @@ jobs:
         run: |
           bash .github/scripts/run_pytest_methods.bash 2
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         with:
           files: ./coverage-unit.xml,./coverage-regression.xml,./coverage-method.xml
           name: codecov-cclib
-          fail_ci_if_error: true
+          fail_ci_if_error: false
           verbose: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         if: matrix.container == 'shivupa/cclib-ci:py311-edge'
       - name: Install pypa/build
         run: |
@@ -100,6 +102,7 @@ jobs:
       matrix:
         install-method: [wheel, source]
         python-version:
+          - 3.7
           - 3.8
           - 3.9
           - "3.10"

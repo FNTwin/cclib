@@ -67,6 +67,20 @@ class Gaussian(logfileparser.Logfile):
     }
 
     def before_parsing(self):
+        # Examples:
+        #  Gaussian 16:  Apple M1-G16RevC.02  7-Dec-2021
+        #  Gaussian 16:  ES64L-G16RevC.01  3-Jul-2019
+        #  Gaussian 98:  IBM-RS6000-G98RevA.7 11-Apr-1999
+        #  Gaussian 98:  SGI64-G98RevA.7 11-Apr-1999
+        self.re_platform_and_version = re.compile(
+            r"""
+            \ Gaussian\ (?P<year>\d{2}):\ {2}
+            (?P<platform>\w*\ ?\w*(?:-\w*)?)-G(?P<year_suffix>\d{2})Rev(?P<revision>[A-Z]\.\d{1,2}(?:\.\d)?)\ *
+            (?P<compile_date>\d{1,2}-[A-Z][a-z]{2}-\d{4})
+            """,
+            re.VERBOSE,
+        )
+
         # Calculations use point group symmetry by default.
         self.uses_symmetry = True
 
@@ -175,7 +189,7 @@ class Gaussian(logfileparser.Logfile):
             self.set_attribute("grads", numpy.array(grads_std))
 
         if hasattr(self, "ccenergy"):
-            self.append_attribute("ccenergies", utils.convertor(self.ccenergy, "hartree", "eV"))
+            self.append_attribute("ccenergies", self.ccenergy)
             del self.ccenergy
 
         # If we have cpu times but no wall-times, we can calculate the later based on the number of CPUs used.
@@ -183,6 +197,23 @@ class Gaussian(logfileparser.Logfile):
             self.metadata["wall_time"] = []
             for cpu_time in self.metadata["cpu_time"]:
                 self.metadata["wall_time"].append(cpu_time / self.num_cpu)
+
+        # Some calculation types don't use consistent MP levels throughout.
+        # For example, EOM-CCSD + opt prints MP3 and MP4 energies for the first iteration only.
+        # However, mpenergies needs to be homogeneous, so we need to do something about it.
+        if hasattr(self, "mpenergies"):
+            max_mp = max(len(mp_e) for mp_e in self.mpenergies)
+            mp_energies = []
+            for index, energy in enumerate(self.mpenergies):
+                if len(energy) != max_mp:
+                    self.logger.warning(
+                        "MP energies of order %d are incomplete and will be ignored", index + 2
+                    )
+
+                else:
+                    mp_energies.append(energy)
+
+            self.set_attribute("mpenergies", mp_energies)
 
     def extract(self, inputfile, line):
         """Extract information from the file object inputfile."""
@@ -200,17 +231,16 @@ class Gaussian(logfileparser.Logfile):
         # ES64L-G16RevA.03 25-Dec-2016" becomes "2016+A.03".
         if "Gaussian, Inc.," in line:
             self.skip_lines(inputfile, ["b", "s"])
-            _, _, platform_full_version, compile_date = next(inputfile).split()
-            run_date = next(inputfile).strip()
-            platform_full_version_tokens = platform_full_version.split("-")
-            full_version = platform_full_version_tokens[-1]
-            platform = "-".join(platform_full_version_tokens[:-1])
-            year_suffix = full_version[1:3]
-            revision = full_version[6:]
-            self.metadata["package_version"] = (
-                f"{self.YEAR_SUFFIXES_TO_YEARS[year_suffix]}+{revision}"
-            )
-            self.metadata["platform"] = platform
+            mtch = self.re_platform_and_version.match(next(inputfile))
+            if mtch is not None:
+                groupdict = mtch.groupdict()
+                year_suffix = groupdict["year_suffix"]
+                revision = groupdict["revision"]
+                self.metadata["package_version"] = (
+                    f"{self.YEAR_SUFFIXES_TO_YEARS[year_suffix]}+{revision}"
+                )
+                self.metadata["platform"] = groupdict["platform"]
+            run_date = next(inputfile).strip()  # noqa: F841
 
         if line.strip().startswith("Link1:  Proceeding to internal job step number"):
             self.new_internal_job()
@@ -323,7 +353,7 @@ class Gaussian(logfileparser.Logfile):
             # Also, in older versions there is bo blank line (G98 regressions),
             # so we need to watch out for leaving the link.
             natom = 0
-            while line.split() and not "Variables" in line and not "Leave Link" in line:
+            while line.split() and "Variables" not in line and "Leave Link" not in line:
                 natom += 1
                 line = next(inputfile)
             self.set_attribute("natom", natom)
@@ -339,7 +369,7 @@ class Gaussian(logfileparser.Logfile):
             self.updateprogress(inputfile, "Charge and Multiplicity", self.fupdate)
 
             if line.split()[-1] == "supermolecule" or (
-                not "fragment" in line and not "model system" in line
+                "fragment" not in line and "model system" not in line
             ):
                 regex = r".*=(.*)Mul.*=\s*-?(\d+).*"
                 match = re.match(regex, line)
@@ -566,7 +596,9 @@ class Gaussian(logfileparser.Logfile):
                         numpy.testing.assert_equal(self.moments[4], hexadecapole)
                     except AssertionError:
                         self.logger.warning(
-                            f"Attribute hexadecapole changed value ({self.moments[4]} -> {hexadecapole})"
+                            "Attribute hexadecapole changed value (%s -> %s)",
+                            self.moments[4],
+                            hexadecapole,
                         )
                     self.append_attribute("moments", hexadecapole)
 
@@ -643,7 +675,7 @@ class Gaussian(logfileparser.Logfile):
 
             line = next(inputfile)
             broken = line.split(";")[1].split()
-            ene = utils.convertor(utils.float(broken[-1]), "hartree", "eV")
+            ene = utils.float(broken[-1])
             if not hasattr(self, "energies_BOMD"):
                 self.set_attribute("energies_BOMD", {step: ene})
             else:
@@ -659,7 +691,7 @@ class Gaussian(logfileparser.Logfile):
 
             atomcoords = []
             line = next(inputfile)
-            while not "MW cartesian" in line:
+            while "MW cartesian" not in line:
                 broken = line.split()
                 atomcoords.append(list(map(utils.float, (broken[3], broken[5], broken[7]))))
                 #    self.inputatoms.append(int(broken[1]))
@@ -754,7 +786,7 @@ class Gaussian(logfileparser.Logfile):
         # Eventually we want to make this more general, or even better parse the output for
         # all fragment, but that will happen in a newer version of cclib.
         if line[1:16] == "Fragment guess:" and getattr(self, "nfragments", 0) > 1:
-            if not "full" in line:
+            if "full" not in line:
                 raise StopParsing()
 
         # Another hack for regression Gaussian03/ortho_prod_freq.log, which is an ONIOM job.
@@ -861,8 +893,7 @@ class Gaussian(logfileparser.Logfile):
                         shell_line = line
 
         if "Dispersion energy=" in line:
-            dispersion = utils.convertor(float(line.split()[-2]), "hartree", "eV")
-            self.append_attribute("dispersionenergies", dispersion)
+            self.append_attribute("dispersionenergies", float(line.split()[-2]))
 
         # Find the targets for SCF convergence (QM calcs).
         # Not for BOMD as targets are not available in the summary
@@ -871,7 +902,7 @@ class Gaussian(logfileparser.Logfile):
                 self.scftargets = []
             # The following can happen with ONIOM which are mixed SCF
             # and semi-empirical
-            if type(self.scftargets) == type(numpy.array([])):
+            if isinstance(self.scftargets, numpy.ndarray):
                 self.scftargets = []
 
             scftargets = []
@@ -987,17 +1018,12 @@ class Gaussian(logfileparser.Logfile):
                 self.metadata["methods"].append("DFT")
                 self.metadata["functional"] = t1[t1.index("(") + 2 : t1.rindex(")")]
 
-            if not hasattr(self, "scfenergies"):
-                self.scfenergies = []
-
-            self.scfenergies.append(utils.convertor(utils.float(line.split()[4]), "hartree", "eV"))
+            self.append_attribute("scfenergies", utils.float(line.split()[4]))
         # gmagoon 5/27/09: added scfenergies reading for PM3 case
         # Example line: " Energy=   -0.077520562724 NIter=  14."
         # See regression Gaussian03/QVGXLLKOCUKJST-UHFFFAOYAJmult3Fixed.out
         if line[1:8] == "Energy=":
-            if not hasattr(self, "scfenergies"):
-                self.scfenergies = []
-            self.scfenergies.append(utils.convertor(utils.float(line.split()[1]), "hartree", "eV"))
+            self.append_attribute("scfenergies", utils.float(line.split()[1]))
 
         # Total energies after Moller-Plesset corrections.
         # Second order correction is always first, so its first occurance
@@ -1010,20 +1036,13 @@ class Gaussian(logfileparser.Logfile):
         # Newer versions of gausian introduced a space between 'EUMP2' and '='...
         if "EUMP2 =" in line[27:36] or "EUMP2=" in line[27:35]:
             self.metadata["methods"].append("MP2")
-
-            if not hasattr(self, "mpenergies"):
-                self.mpenergies = []
-            self.mpenergies.append([])
-            mp2energy = utils.float(line.split("=")[2])
-            self.mpenergies[-1].append(utils.convertor(mp2energy, "hartree", "eV"))
+            self.append_attribute("mpenergies", [utils.float(line.split("=")[2])])
 
         # Example MP3 output line:
         #  E3=       -0.10518801D-01     EUMP3=      -0.75012800924D+02
         if line[34:40] == "EUMP3=":
             self.metadata["methods"].append("MP3")
-
-            mp3energy = utils.float(line.split("=")[2])
-            self.mpenergies[-1].append(utils.convertor(mp3energy, "hartree", "eV"))
+            self.mpenergies[-1].append(utils.float(line.split("=")[2]))
 
         # Example MP4 output lines:
         #  E4(DQ)=   -0.31002157D-02        UMP4(DQ)=   -0.75015901139D+02
@@ -1040,14 +1059,13 @@ class Gaussian(logfileparser.Logfile):
                 line = next(inputfile)
                 if line[34:45] == "UMP4(SDTQ)=":
                     mp4energy = utils.float(line.split("=")[2])
-            self.mpenergies[-1].append(utils.convertor(mp4energy, "hartree", "eV"))
+            self.mpenergies[-1].append(mp4energy)
 
         # Example MP5 output line:
         #  DEMP5 =  -0.11048812312D-02 MP5 =  -0.75017172926D+02
         if line[29:34] == "MP5 =":
             self.metadata["methods"].append("MP5")
-            mp5energy = utils.float(line.split("=")[2])
-            self.mpenergies[-1].append(utils.convertor(mp5energy, "hartree", "eV"))
+            self.mpenergies[-1].append(utils.float(line.split("=")[2]))
 
         # Total energies after Coupled Cluster corrections.
         # Second order MBPT energies (MP2) are also calculated for these runs,
@@ -1087,12 +1105,13 @@ class Gaussian(logfileparser.Logfile):
                 self.logger.debug(line)
                 parts = line.split()
                 if "NO" in parts[-1]:
-                    allconverged = False
+                    allconverged = False  # noqa: F841
                 try:
                     value = utils.float(parts[2])
                 except ValueError:
                     self.logger.error(
-                        f"Problem parsing the value for geometry optimisation: {parts[2]} is not a number."
+                        "Problem parsing the value for geometry optimisation: %s is not a number.",
+                        parts[2],
                     )
                 else:
                     newlist[i] = value
@@ -1203,9 +1222,7 @@ class Gaussian(logfileparser.Logfile):
             scanparm = [[] for _ in range(len(self.scannames))]
             while line != hyphens:
                 broken = line.split()
-                self.append_attribute(
-                    "scanenergies", (utils.convertor(float(broken[-1]), "hartree", "eV"))
-                )
+                self.append_attribute("scanenergies", float(broken[-1]))
                 for idx, p in enumerate(broken[1:-1]):
                     scanparm[idx].append(float(p))
                 # self.append_attribute('scanparm', [float(p) for p in broken[1:-1]])
@@ -1248,10 +1265,9 @@ class Gaussian(logfileparser.Logfile):
                 except ValueError:
                     eigenvalues = [numpy.nan for _ in cols]
                 assert len(eigenvalues) == len(indices)
-                eigenvalues = [utils.convertor(e, "hartree", "eV") for e in eigenvalues]
                 scanenergies.extend(eigenvalues)
 
-                for _, name in enumerate(self.scannames_all):
+                for name in self.scannames_all:
                     line = next(inputfile)
                     assert line.split()[0] == name
                     if name in self.scannames_scanned:
@@ -1351,7 +1367,7 @@ class Gaussian(logfileparser.Logfile):
                         x = utils.float(s)
                     except ValueError:
                         x = numpy.nan
-                    self.moenergies[0].append(utils.convertor(x, "hartree", "eV"))
+                    self.moenergies[0].append(x)
                     i += 1
                 line = next(inputfile)
 
@@ -1376,7 +1392,7 @@ class Gaussian(logfileparser.Logfile):
                 i = 0
                 while i * 10 + 4 < len(part):
                     x = part[i * 10 : (i + 1) * 10]
-                    self.moenergies[1].append(utils.convertor(utils.float(x), "hartree", "eV"))
+                    self.moenergies[1].append(utils.float(x))
                     i += 1
                 line = next(inputfile)
 
@@ -1593,11 +1609,13 @@ class Gaussian(logfileparser.Logfile):
             # Excited State   1:      Singlet-?Sym    2.5938 eV  478.01 nm  f=0.0000  <S**2>=0.000
             p = re.compile(r":(?P<sym>.*?)(?P<energy>-?\d*\.\d*) eV")
             groups = p.search(line).groups()
-            self.etenergies.append(utils.convertor(utils.float(groups[1]), "eV", "wavenumber"))
-            self.etoscs.append(utils.float(line.split("f=")[-1].split()[0]))
+            self.append_attribute(
+                "etenergies", utils.convertor(utils.float(groups[1]), "eV", "hartree")
+            )
+            self.append_attribute("etoscs", utils.float(line.split("f=")[-1].split()[0]))
             # Fix Gaussian's weird capitalisation.
             mult, symm = groups[0].strip().split("-")
-            self.append_attribute("etsyms", "{}-{}".format(mult, self.normalisesym(symm)))
+            self.append_attribute("etsyms", f"{mult}-{self.normalisesym(symm)}")
 
             line = next(inputfile)
 
@@ -1631,7 +1649,7 @@ class Gaussian(logfileparser.Logfile):
                 # after parsing (see after_parsing() above).
                 CIScontrib.append([(fromMO, frommoindex), (toMO, tomoindex), percent])
                 line = next(inputfile)
-            self.etsecs.append(CIScontrib)
+            self.append_attribute("etsecs", CIScontrib)
 
             # Skip over 'de-excitation' contributions (these are typically hidden but can be revealed
             # by iop(9/40=2)).
@@ -1804,7 +1822,9 @@ class Gaussian(logfileparser.Logfile):
                     assert nbasis == self.nbasis
                 except AssertionError:
                     self.logger.warning(
-                        f"Number of basis functions (nbasis) has changed from {int(self.nbasis)} to {int(nbasis)}"
+                        "Number of basis functions (nbasis) has changed from %s to %s",
+                        self.nbasis,
+                        nbasis,
                     )
             self.nbasis = nbasis
 
@@ -1910,7 +1930,7 @@ class Gaussian(logfileparser.Logfile):
                     self.logger.warning("Molecular coefficients header found but no coefficients.")
                     break
 
-                symmetries = next(inputfile)
+                symmetries = next(inputfile)  # noqa: F841
                 eigenvalues = next(inputfile)
                 for i in range(self.nbasis):
                     line = next(inputfile)
@@ -1921,7 +1941,7 @@ class Gaussian(logfileparser.Logfile):
                         parts = line[:start_of_basis_fn_name].split()
                         if len(parts) > 1:  # New atom
                             if i > 0:
-                                self.atombasis.append(atombasis)
+                                self.atombasis.append(atombasis)  # noqa: F821
                             atombasis = []
                             atomname = f"{parts[2]}{parts[1]}"
                         orbital = line[start_of_basis_fn_name:20].strip()
@@ -1962,7 +1982,7 @@ class Gaussian(logfileparser.Logfile):
             atombasis = []
             for base in range(0, self.nmo, 5):
                 self.updateprogress(inputfile, updateprogress_title, self.fupdate)
-                colmNames = next(inputfile)
+                self.skip_line(inputfile, "column numbers")
                 eigenvalues = next(inputfile)
                 occnos.extend(map(float, eigenvalues.split()[2:]))
                 for i in range(self.nbasis):
@@ -1973,7 +1993,7 @@ class Gaussian(logfileparser.Logfile):
                         # New atom.
                         if len(parts) > 1:
                             if i > 0:
-                                atombasis.append(basisonatom)
+                                atombasis.append(basisonatom)  # noqa: F821
                             basisonatom = []
                             atomname = f"{parts[2]}{parts[1]}"
                         orbital = line[11:20].strip()
@@ -2256,9 +2276,9 @@ class Gaussian(logfileparser.Logfile):
                         # "mulliken atomic charges:" and " atomic charges:"
                         if prop == "atomic":
                             if (
-                                not "mulliken" in line.lower()
-                                and not "lowdin" in line.lower()
-                                and not "apt" in line.lower()
+                                "mulliken" not in line.lower()
+                                and "lowdin" not in line.lower()
+                                and "apt" not in line.lower()
                             ):
                                 extract_charges_spins(line, prop)
                         else:
@@ -2271,9 +2291,9 @@ class Gaussian(logfileparser.Logfile):
                 line1 = next(inputfile)
                 line2 = next(inputfile)
                 if line1.split()[0] == "Natural" and line2.split()[2] == "Charge":
-                    dashes = next(inputfile)
+                    self.skip_line(inputfile, "d")
                     charges = []
-                    for i in range(self.natom):
+                    for _ in range(self.natom):
                         nline = next(inputfile)
                         charges.append(float(nline.split()[2]))
                     self.atomcharges["natural"] = charges
@@ -2395,7 +2415,7 @@ class Gaussian(logfileparser.Logfile):
                             line[83:95],
                         ]
                     ]
-                except:
+                except:  # noqa: E722
                     # G16A03 and older
                     # Sample:
                     #       Exact polarizability:  68.238  -6.777 143.018   0.000   0.000  11.343
@@ -2492,9 +2512,9 @@ class Gaussian(logfileparser.Logfile):
         # Extract total elapsed (wall) and CPU job times
         if line[:14] == " Elapsed time:" or line[:14] == " Job cpu time:":
             # create empty list for the times to be stored in
-            if line[:14] == " Elapsed time:" and not "wall_time" in self.metadata:
+            if line[:14] == " Elapsed time:" and "wall_time" not in self.metadata:
                 self.metadata["wall_time"] = []
-            if line[:14] == " Job cpu time:" and not "cpu_time" in self.metadata:
+            if line[:14] == " Job cpu time:" and "cpu_time" not in self.metadata:
                 self.metadata["cpu_time"] = []
             # the line format is " Elapsed time:       0 days  0 hours  0 minutes 47.5 seconds." at the end of each job ran.
             # the line format is " Job cpu time:       0 days  0 hours  8 minutes 45.7 seconds." at the end of each job ran.
@@ -2515,7 +2535,7 @@ class Gaussian(logfileparser.Logfile):
                     seconds=float(split_line[n + 6]),
                 )
                 self.metadata[key].append(time)
-            except:
+            except:  # noqa: E722
                 pass
 
         # Extract Rotational Constants

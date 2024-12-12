@@ -14,7 +14,7 @@
 import math
 import re
 
-from cclib.parser import data, logfileparser, utils
+from cclib.parser import logfileparser, utils
 
 import numpy
 
@@ -115,7 +115,7 @@ class MOPAC(logfileparser.Logfile):
             self.inputcoords = []
             self.inputatoms = []
 
-            blankline = next(inputfile)
+            self.skip_line(inputfile, "b")
 
             atomcoords = []
             line = next(inputfile)
@@ -145,13 +145,13 @@ class MOPAC(logfileparser.Logfile):
             mult = self.spinstate[line.split()[1]]
             self.set_attribute("mult", mult)
 
-        # Read energy (in kcal/mol, converted to eV)
+        # Read energy (in kcal/mol)
         #
         # FINAL HEAT OF FORMATION =       -333.88606 KCAL =   -1396.97927 KJ
         if "FINAL HEAT OF FORMATION =" in line:
-            if not hasattr(self, "scfenergies"):
-                self.scfenergies = []
-            self.scfenergies.append(utils.convertor(utils.float(line.split()[5]), "kcal/mol", "eV"))
+            self.append_attribute(
+                "scfenergies", utils.convertor(utils.float(line.split()[5]), "kcal/mol", "hartree")
+            )
 
         # Molecular mass parsing (units will be amu)
         #
@@ -168,16 +168,13 @@ class MOPAC(logfileparser.Logfile):
         # note that the last occurence of this in the thermochemistry section has reduced precision,
         # so we will want to use the 2nd to last instance
         if line[0:40] == "          ROTATIONAL CONSTANTS IN CM(-1)":
-            blankline = next(inputfile)
-            rotinfo = next(inputfile)
-            if not hasattr(self, "rotconsts"):
-                self.rotconsts = []
-            broken = rotinfo.split()
+            self.skip_line(inputfile, "b")
+            broken = next(inputfile).split()
             # leave the rotational constants in Hz
             a = float(broken[2])
             b = float(broken[5])
             c = float(broken[8])
-            self.rotconsts.append([a, b, c])
+            self.append_attribute("rotconsts", [a, b, c])
 
         # Start of the IR/Raman frequency section.
         # Example:

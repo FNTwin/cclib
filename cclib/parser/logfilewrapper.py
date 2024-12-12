@@ -13,8 +13,10 @@ import io
 import logging
 import pathlib
 import re
+import sys
 import typing
 import zipfile
+from collections.abc import Iterator
 from tempfile import NamedTemporaryFile
 from urllib.error import URLError
 from urllib.request import urlopen
@@ -44,8 +46,13 @@ def logerror(error):
 
 codecs.register_error("logerror", logerror)
 
+if sys.version_info.minor > 8:
+    FileWrapperBase = Iterator[str]
+else:
+    FileWrapperBase = Iterator
 
-class FileWrapper:
+
+class FileWrapper(FileWrapperBase):
     """Wrap any supported input file type."""
 
     def __init__(self, *sources) -> None:
@@ -145,9 +152,7 @@ class FileWrapper:
 
             except (ValueError, URLError) as error:
                 # Maybe no need to raise a different exception?
-                raise ValueError(
-                    "Encountered an error processing the URL '{}'".format(source)
-                ) from error
+                raise ValueError(f"Encountered an error processing the URL '{source}'") from error
 
         elif hasattr(source, "read") or hasattr(source, "readline"):
             # This file is a file.
@@ -222,20 +227,23 @@ class FileWrapper:
         """
         self.close()
 
-    def next(self) -> str:
+    def __next__(self) -> str:
         """
         Get the next line from this log file.
         """
         try:
             try:
+                # If this throws StopIteration, move to the next file.
+                # If this throws IndexError, we've exhausted all files and are really done.
                 line = next(self.files[self.file_pointer])
                 self.last_lines.append(line)
                 self.pos += len(line)
                 return line
 
             except StopIteration:
+                # Corresponds to the next file.
                 self.file_pointer += 1
-                return self.next()
+                return next(self)
 
         except IndexError:
             raise StopIteration()
@@ -246,9 +254,6 @@ class FileWrapper:
         Return the last line read by this parser.
         """
         return self.last_lines[-1]
-
-    def __next__(self):
-        return self.next()
 
     def __iter__(self):
         return self

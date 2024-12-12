@@ -172,7 +172,10 @@ class WFXWriter(filewriter.Writer):
         """Section: Nuclear Cartesian Coordinates.
         Nuclear coordinates in Bohr."""
         coord_template = WFX_FIELD_FMT * 3
-        to_bohr = lambda x: utils.convertor(x, "Angstrom", "bohr")
+
+        def to_bohr(x: float) -> float:
+            return utils.convertor(x, "Angstrom", "bohr")
+
         nuc_coords = [
             coord_template % tuple(to_bohr(coord)) for coord in self.ccdata.atomcoords[-1]
         ]
@@ -298,10 +301,10 @@ class WFXWriter(filewriter.Writer):
         alpha_elctrons = self._no_alpha_electrons()
         beta_electrons = self._no_beta_electrons()
         for mo_energy in self.ccdata.moenergies[0][:alpha_elctrons]:
-            mo_energies.append(WFX_FIELD_FMT % (utils.convertor(mo_energy, "eV", "hartree")))
+            mo_energies.append(WFX_FIELD_FMT % mo_energy)
         if self.ccdata.mult > 1:
             for mo_energy in self.ccdata.moenergies[1][:beta_electrons]:
-                mo_energies.append(WFX_FIELD_FMT % (utils.convertor(mo_energy, "eV", "hartree")))
+                mo_energies.append(WFX_FIELD_FMT % mo_energy)
         return mo_energies
 
     def _mo_spin_types(self):
@@ -448,7 +451,7 @@ class WFXWriter(filewriter.Writer):
             energy = self.ccdata.scfenergies[-1]
         else:
             raise filewriter.MissingAttributeError("scfenergies/mpenergies/ccenergies")
-        return WFX_FIELD_FMT % (utils.convertor(energy, "eV", "hartree"))
+        return WFX_FIELD_FMT % energy
 
     def _virial_ratio(self) -> str:
         """Ratio of kinetic energy to potential energy."""
@@ -501,7 +504,7 @@ class WFXWriter(filewriter.Writer):
             try:
                 section_data = section_module()
                 wfx_lines.extend(_section(section_name, section_data))
-            except:
+            except:  # noqa: E722
                 if section_required:
                     raise filewriter.MissingAttributeError(
                         f"Unable to write required wfx section: {section_name}"

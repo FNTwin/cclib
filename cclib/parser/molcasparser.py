@@ -72,6 +72,8 @@ class Molcas(logfileparser.Logfile):
         # ccData object and return an iterator - something for 2.x
         self.gateway_module_count = 0
 
+        self.success_headers = ("Happy landing!", "RC_ALL_IS_WELL")
+
     def extract(self, inputfile, line):
         """Extract information from the file object inputfile."""
 
@@ -241,10 +243,7 @@ class Molcas(logfileparser.Logfile):
 
         # ::    Total SCF energy                                -37.6045426484
         if line[:22] == "::    Total SCF energy" or line[:25] == "::    Total KS-DFT energy":
-            if not hasattr(self, "scfenergies"):
-                self.scfenergies = []
-            scfenergy = float(line.split()[-1])
-            self.scfenergies.append(utils.convertor(scfenergy, "hartree", "eV"))
+            self.append_attribute("scfenergies", float(line.split()[-1]))
 
         ## Parsing the scftargets in this section
         #  ++    Optimization specifications:
@@ -328,8 +327,7 @@ class Molcas(logfileparser.Logfile):
                 match = re.match(iteration_regex, line.strip())
                 if match:
                     groups = match.groups()
-                    cols = [g.strip() for g in match.groups()]
-                    cols = [c.replace("*", "") for c in cols]
+                    cols = [g.strip().replace("*", "") for g in groups]
 
                     energy = float(cols[4])
                     density = float(cols[5])
@@ -642,7 +640,10 @@ class Molcas(logfileparser.Logfile):
                 self.atomcoords.append(atomcoords)
             else:
                 self.logger.warning(
-                    f"Parsed coordinates not consistent with previous, skipping. This could be due to symmetry being turned on during the job. Length was {len(self.atomcoords[-1])}, now found {len(atomcoords)}. New coordinates: {str(atomcoords)}"
+                    "Parsed coordinates not consistent with previous, skipping. This could be due to symmetry being turned on during the job. Length was %d, now found %d. New coordinates: %s",
+                    len(self.atomcoords[-1]),
+                    len(atomcoords),
+                    atomcoords,
                 )
 
         #  **********************************************************************************************************************
@@ -695,7 +696,9 @@ class Molcas(logfileparser.Logfile):
                 self.atomcoords.append(atomcoords)
             else:
                 self.logger.error(
-                    f"Number of atoms ({len(atomcoords)}) in parsed atom coordinates is smaller than previously ({int(self.natom)}), possibly due to symmetry. Ignoring these coordinates."
+                    "Number of atoms (%d) in parsed atom coordinates is smaller than previously (%d), possibly due to symmetry. Ignoring these coordinates.",
+                    len(atomcoords),
+                    int(self.natom),
                 )
 
         ## Parsing Molecular Gradients attributes in this section.
@@ -806,9 +809,7 @@ class Molcas(logfileparser.Logfile):
                             mocoeffs.append([])
 
                     if "Energy" in line:
-                        energies = [
-                            utils.convertor(float(x), "hartree", "eV") for x in line.split()[1:]
-                        ]
+                        energies = [float(x) for x in line.split()[1:]]
                         moenergies.extend(energies)
 
                     if "Occ. No." in line:
@@ -861,11 +862,7 @@ class Molcas(logfileparser.Logfile):
         #
         #         Shanks-type energy S1(E)             =      -75.0009150108 a.u.
         if "Total MBPT2 energy" in line:
-            mpenergies = []
-            mpenergies.append(utils.convertor(utils.float(line.split()[4]), "hartree", "eV"))
-            if not hasattr(self, "mpenergies"):
-                self.mpenergies = []
-            self.mpenergies.append(mpenergies)
+            self.append_attribute("mpenergies", [utils.float(line.split()[4])])
 
         # Parsing data ccenergies from &CCSDT module.
         #  --- Start Module: ccsdt at Thu Jul 26 14:03:23 2018 ---
@@ -889,11 +886,7 @@ class Molcas(logfileparser.Logfile):
             if "&CCSDT" in line:
                 while not line.strip().startswith("Total energy (diff)"):
                     line = next(inputfile)
-
-                ccenergies = utils.convertor(utils.float(line.split()[4]), "hartree", "eV")
-                if not hasattr(self, "ccenergies"):
-                    self.ccenergies = []
-                self.ccenergies.append(ccenergies)
+                self.append_attribute("ccenergies", utils.float(line.split()[4]))
 
         #  ++    Primitive basis info:
         #        ---------------------
@@ -939,7 +932,6 @@ class Molcas(logfileparser.Logfile):
 
                     exponents = []
                     coefficients = []
-                    func_array = []
                     while line.split():
                         exponents.append(utils.float(line.split()[1]))
                         coefficients.append([utils.float(i) for i in line.split()[2:]])
@@ -992,7 +984,7 @@ class Molcas(logfileparser.Logfile):
                     try:
                         basis_element = line.split()[3].split(".")[0]
                         basis_element = basis_element[0] + basis_element[1:].lower()
-                    except:
+                    except:  # noqa: E722
                         self.logger.warning("Basis set label is missing!")
                         basis_element = ""
                 if "valence basis set:" in line.lower():
@@ -1014,3 +1006,6 @@ class Molcas(logfileparser.Logfile):
                     ncore = 0
 
                 line = next(inputfile)
+
+        if any(candidate in line for candidate in self.success_headers):
+            self.metadata["success"] = True
